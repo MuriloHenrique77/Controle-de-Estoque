@@ -32,6 +32,17 @@ yarn-error.*
 
 # local env files
 .env*.local
+.env
+.env.*
+!.env.example
+
+# Logs, builds and local validation artifacts
+*.log
+*.apk
+*.aab
+coverage/
+tmp/
+temp/
 
 # typescript
 *.tsbuildinfo

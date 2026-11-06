@@ -1,0 +1,28 @@
+{
+  "score": 5,
+  "summary": "PASS nas invariantes revisadas e nos 500 cenários locais executados. Nenhum bypass reproduzido no modelo de cliente autenticado do MVP. As Rules remotas são iguais às locais; nenhum deploy realizado. A pontuação não representa prova exaustiva de segurança.",
+  "findings": [],
+  "skill": "firebase-security-rules-auditor",
+  "project": "controle-de-estoque---tcc",
+  "localTestProject": "demo-estoque-local",
+  "tests": { "passed": 500, "failed": 0, "previousScenariosPreserved": 498, "newConcurrencyScenarios": 2 },
+  "checks": {
+    "updateBypass": "Create e update validam schema, tipos, limites e identidade. Diff impede trocar vínculos, inicial, tipo e autoria. Perfil e estabelecimento não aceitam update/delete.",
+    "authoritySource": "UID e email autenticados no onboarding atômico; perfil persistido e imutável define estabelecimento. Papel/admin não pode ser acrescentado ao perfil.",
+    "ownership": "Operações de domínio exigem vínculo do perfil com estabelecimento existente no documento. A/B, anônimo, usuário sem perfil e consultas sem escopo são negados.",
+    "businessCompatibility": "Criação inicial e movimentações atômicas, edição/exclusão individual, inativação/reativação e leitura histórica permanecem permitidas. Não existe autorização de cascade.",
+    "resourceLimits": "Nomes até 120, descrições/observações até 2000, email até 254, IDs até 128/136 e registro técnico até 6 IDs únicos tipados. O histórico completo não é limitado a 6.",
+    "typeSafety": "Quantidades inteiras seguras e não negativas; datas timestamp; bool/status/listas/IDs validados. Contador de produtos admite double integral do SDK Android.",
+    "stock": "Projeção só muda com delta exato vinculado a um movimento do mesmo commit; saldo negativo e alteração direta são negados. Concorrência com CAS e releitura preserva histórico e saldo.",
+    "lifecycle": "Produto inativo impede create/update/delete de movimentos. Inativação exige autor autenticado e request.time; reativação limpa auditoria. Não permite alterar status e estoque no mesmo update.",
+    "irreversibleHistory": "Marcador true não retorna a false, inclusive após apagar a última movimentação. Marcador legado ausente bloqueia exclusão permanente conservadoramente.",
+    "RN08": "Contador do setor muda somente com criação/exclusão correspondente de produto via getAfter; ativos e inativos contam igualmente. Setor com contador positivo não pode ser removido.",
+    "timestamps": "Criação e atualização usam request.time; criadoEm permanece imutável. Consultas de período testam início inclusivo, fim exclusivo e precisão submilissegundo.",
+    "denyByDefault": "Paths não previstos e subcoleções continuam fechados. HasOnly/diff sempre acompanham autorização de identidade. Nenhuma ACL depende de campo editável pelo cliente."
+  },
+  "limits": [
+    "Credenciais administrativas contornam Security Rules e pertencem à fronteira de confiança. Fixtures administrativas de legado foram usadas somente no Emulator demo.",
+    "RN08 pressupõe contador coerente para dados escritos pelo aplicativo; não há migração automática de dados arbitrários inseridos por administrador.",
+    "Esta auditoria não altera nem valida serviços externos fora de Auth/Firestore do MVP."
+  ]
+}

@@ -1,64 +1,48 @@
-import { NavigationContainer, getFocusedRouteNameFromRoute } from '@react-navigation/native';
-import { createDrawerNavigator } from '@react-navigation/drawer';
-import { createStackNavigator } from '@react-navigation/stack';
+import { NavigationContainer } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import RootNavigator from './src/navigation/RootNavigator';
+import { SessionProvider } from './src/session/SessionProvider';
+import { useFonts } from 'expo-font';
+import { Inter_400Regular } from '@expo-google-fonts/inter/400Regular';
+import { Inter_500Medium } from '@expo-google-fonts/inter/500Medium';
+import { Inter_600SemiBold } from '@expo-google-fonts/inter/600SemiBold';
+import { Inter_700Bold } from '@expo-google-fonts/inter/700Bold';
+import BootScreen from './src/components/BootScreen';
+import { navigationTheme } from './src/theme/navigation';
+import { FeedbackProvider } from './src/components/ui/FeedbackProvider';
+import { StatusBar } from 'expo-status-bar';
+import * as SplashScreen from 'expo-splash-screen';
+import { useCallback, useRef } from 'react';
 
-import Vendas from './src/screens/Vendas';
-import SetoresScreen from './src/screens/setores/SetoresScreen';
-import SetorFormScreen from './src/screens/setores/SetorFormScreen';
-import ProdutosScreen from './src/screens/setores/ProdutosScreen';
-import ProdutoFormScreen from './src/screens/setores/ProdutoFormScreen';
-
-const Drawer = createDrawerNavigator();
-const Stack = createStackNavigator();
-
-function SetoresStack() {
-  return (
-    <Stack.Navigator>
-      <Stack.Screen
-        name="SetoresHome"
-        component={SetoresScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="SetorForm"
-        component={SetorFormScreen}
-        options={{ title: 'Novo setor' }}
-      />
-      <Stack.Screen
-        name="Produtos"
-        component={ProdutosScreen}
-        options={{ title: 'Produtos' }}
-      />
-      <Stack.Screen
-        name="ProdutoForm"
-        component={ProdutoFormScreen}
-        options={{ title: 'Novo produto' }}
-      />
-    </Stack.Navigator>
-  );
-}
-
-function getDrawerHeaderVisible(route: any) {
-  const routeName = getFocusedRouteNameFromRoute(route) ?? 'SetoresHome';
-  return routeName === 'SetoresHome';
-}
+// A raiz persistente libera a splash, sem aguardar fontes, imagem ou sessão.
+void SplashScreen.preventAutoHideAsync().catch(() => {
+  console.warn('Não foi possível preparar a abertura nativa.');
+});
 
 export default function App() {
+  const [fontesCarregadas, erroFonte] = useFonts({ Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold });
+  const splashLiberada = useRef(false);
+  const ocultarSplashNativa = useCallback(() => {
+    if (splashLiberada.current) return;
+    splashLiberada.current = true;
+    void SplashScreen.hideAsync().catch(() => {
+      splashLiberada.current = false;
+      console.warn('Não foi possível concluir a abertura nativa.');
+    });
+  }, []);
+  // Enquanto recursos locais ou sessão carregam, o React já pode mostrar o Boot.
   return (
-    <SafeAreaProvider>
-      <NavigationContainer>
-        <Drawer.Navigator>
-          <Drawer.Screen
-            name="Setores"
-            component={SetoresStack}
-            options={({ route }) => ({
-              headerShown: getDrawerHeaderVisible(route),
-            })}
-          />
-          <Drawer.Screen name="Vendas" component={Vendas} />
-        </Drawer.Navigator>
-      </NavigationContainer>
+    <SafeAreaProvider onLayout={ocultarSplashNativa}>
+      <StatusBar style="dark" />
+      {!fontesCarregadas ? <BootScreen erro={Boolean(erroFonte)} /> : (
+      <FeedbackProvider>
+      <SessionProvider>
+        <NavigationContainer theme={navigationTheme}>
+          <RootNavigator />
+        </NavigationContainer>
+      </SessionProvider>
+      </FeedbackProvider>
+      )}
     </SafeAreaProvider>
   );
 }

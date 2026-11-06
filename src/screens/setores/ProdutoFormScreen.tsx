@@ -1,119 +1,72 @@
-import React, { useState } from 'react';
-import {
-  Text,
-  TextInput,
-  TouchableOpacity,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  View,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation, useRoute } from '@react-navigation/native';
-import { criarProduto } from '../../storage/produtosStorage';
-import { Produto } from '../../types/produto.types';
-import { Setor } from '../../types/setor.types';
-import { styles } from '../../styles/produtoFormScreen.styles';
+import type { StockScreenProps } from '../../navigation/types';
+import React, { useEffect, useRef, useState } from 'react';
+import { Text, TextInput } from 'react-native';
+import { AuthFormLayout, FormButton, authStyles } from '../../components/AuthFormLayout';
+import { criarProduto, atualizarProduto } from '../../services/produtos/produtosService';
+import { lerQuantidadeFormulario, normalizarEdicaoProduto, mensagemErroProdutos } from '../../utils/produtos';
+import { useSession } from '../../session/SessionProvider';
+import { useFeedback } from '../../components/ui/FeedbackProvider';
 
-export default function ProdutoFormScreen() {
-  const navigation = useNavigation<any>();
-  const route = useRoute<any>();
-  const setor: Setor = route.params?.setor;
+export default function ProdutoFormScreen({ navigation, route }: StockScreenProps<'ProdutoForm'>) {
+  const { setor, produto } = route.params;
+  const { estado } = useSession();
+  const feedback = useFeedback();
+  const contexto = estado.status === 'authenticatedReady'
+    ? { uid: estado.conta.uid, estabelecimentoId: estado.perfil.estabelecimentoId } : null;
+  const valido = contexto !== null && setor.estabelecimentoId === contexto.estabelecimentoId &&
+    (!produto || (produto.estabelecimentoId === contexto.estabelecimentoId && produto.setorId === setor.id));
+  const [nome, setNome] = useState(produto?.nome ?? '');
+  const [descricao, setDescricao] = useState(produto?.descricao ?? '');
+  const [quantidadeInicial, setQuantidadeInicial] = useState('0');
+  const [estoqueMinimo, setEstoqueMinimo] = useState(produto?.estoqueMinimo?.toString() ?? '');
+  const [erro, setErro] = useState<string | null>(null);
+  const [salvando, setSalvando] = useState(false);
+  const ocupado = useRef(false);
+  const ativo = useRef(true);
+  useEffect(() => { ativo.current = true; return () => { ativo.current = false; }; }, []);
 
-  const [nome, setNome] = useState('');
-  const [descricao, setDescricao] = useState('');
-  const [quantidade, setQuantidade] = useState('');
-
-  function validarFormulario() {
-    if (!nome.trim()) {
-      Alert.alert('Atenção', 'Informe o nome do produto.');
-      return false;
-    }
-
-    if (!quantidade.trim()) {
-      Alert.alert('Atenção', 'Informe a quantidade.');
-      return false;
-    }
-
-    if (isNaN(Number(quantidade))) {
-      Alert.alert('Atenção', 'A quantidade deve ser numérica.');
-      return false;
-    }
-
-    return true;
+  async function salvar() {
+    if (ocupado.current || !contexto || !valido) return;
+    let dados;
+    let inicial = 0;
+    try {
+      dados = normalizarEdicaoProduto({ nome, descricao,
+        estoqueMinimo: estoqueMinimo.trim() ? lerQuantidadeFormulario(estoqueMinimo, 'O estoque mínimo') : undefined });
+      if (!produto) inicial = lerQuantidadeFormulario(quantidadeInicial, 'A quantidade inicial');
+    } catch (e) { setErro(e instanceof Error ? e.message : 'Verifique os dados.'); return; }
+    ocupado.current = true;
+    setErro(null);
+    setSalvando(true);
+    try {
+      if (produto) await atualizarProduto(contexto, produto.id, dados);
+      else await criarProduto(contexto, setor.id, { ...dados, quantidadeInicial: inicial });
+      if (ativo.current) {
+        feedback(produto ? 'Produto atualizado com sucesso.' : 'Produto criado com sucesso.');
+        navigation.goBack();
+      }
+    } catch (e) { if (ativo.current) setErro(mensagemErroProdutos(e)); }
+    finally { ocupado.current = false; if (ativo.current) setSalvando(false); }
   }
 
-  async function handleSalvar() {
-    if (!validarFormulario()) {
-      return;
-    }
-
-    const novoProduto: Produto = {
-      id: Date.now().toString(),
-      setorId: setor.id,
-      nome: nome.trim(),
-      descricao: descricao.trim() || undefined,
-      quantidade: Number(quantidade),
-      criadoEm: new Date().toISOString(),
-    };
-
-    await criarProduto(novoProduto);
-    navigation.goBack();
-  }
-
-  return (
-    <SafeAreaView style={styles.safeArea}>
-      <KeyboardAvoidingView
-        style={styles.keyboardContainer}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.card}>
-            <Text style={styles.setorLabel}>Setor selecionado</Text>
-            <Text style={styles.setorNome}>{setor.nome}</Text>
-
-            <Text style={styles.label}>Nome do produto</Text>
-            <TextInput
-              value={nome}
-              onChangeText={setNome}
-              placeholder="Ex: Fertilizante, Controle Xbox..."
-              style={styles.input}
-            />
-
-            <Text style={styles.label}>Descrição</Text>
-            <TextInput
-              value={descricao}
-              onChangeText={setDescricao}
-              placeholder="Descrição opcional"
-              multiline
-              numberOfLines={4}
-              style={styles.textArea}
-            />
-
-            <Text style={styles.label}>Quantidade</Text>
-            <TextInput
-              value={quantidade}
-              onChangeText={setQuantidade}
-              placeholder="0"
-              keyboardType="numeric"
-              style={styles.input}
-            />
-
-            <TouchableOpacity
-              onPress={handleSalvar}
-              activeOpacity={0.8}
-              style={styles.saveButton}
-            >
-              <Text style={styles.saveButtonText}>Salvar produto</Text>
-            </TouchableOpacity>
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
-  );
+  return <AuthFormLayout title={produto ? 'Editar produto' : 'Novo produto'} subtitle={`Setor: ${setor.nome}`}
+    erro={valido ? erro : 'Este produto ou setor não pertence à sessão atual.'}>
+    <Text style={authStyles.label}>Nome do produto</Text>
+    <TextInput accessibilityLabel="Nome do produto" style={authStyles.input} value={nome} onChangeText={t => { setNome(t); setErro(null); }}
+      placeholder="Ex: Fertilizante" maxLength={120} editable={!salvando && valido} />
+    <Text style={authStyles.label}>Descrição</Text>
+    <TextInput accessibilityLabel="Descrição" style={[authStyles.input, { minHeight: 100 }]} value={descricao}
+      onChangeText={t => { setDescricao(t); setErro(null); }} placeholder="Opcional" multiline textAlignVertical="top" maxLength={2000}
+      editable={!salvando && valido} />
+    {produto ? <Text style={authStyles.subtitle}>Quantidade inicial: {produto.quantidadeInicial}. Estoque atual: {produto.estoqueAtual}. Esses valores não são editáveis neste formulário.</Text> : <>
+      <Text style={authStyles.label}>Quantidade inicial</Text>
+      <TextInput accessibilityLabel="Quantidade inicial" style={authStyles.input} value={quantidadeInicial}
+        onChangeText={t => { setQuantidadeInicial(t); setErro(null); }} keyboardType="number-pad" editable={!salvando && valido} />
+    </>}
+    <Text style={authStyles.label}>Estoque mínimo</Text>
+    <TextInput accessibilityLabel="Estoque mínimo" style={authStyles.input} value={estoqueMinimo}
+      onChangeText={t => { setEstoqueMinimo(t); setErro(null); }} placeholder="Opcional" keyboardType="number-pad" editable={!salvando && valido} />
+    {salvando ? <Text style={authStyles.subtitle}>Aguardando confirmação do servidor. É necessária conexão para salvar as alterações.</Text> : null}
+    <FormButton label={salvando ? 'Salvando...' : produto ? 'Salvar alterações' : 'Salvar produto'}
+      loading={salvando} disabled={salvando || !valido} onPress={() => { void salvar(); }} />
+  </AuthFormLayout>;
 }

@@ -1,0 +1,428 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // usuarios/{uid}: id, email, estabelecimentoId.
+    // estabelecimentos/{id}: id, nome, criadoEm (serverTimestamp), criadoPor.
+    // Somente onboarding atômico e leitura individual; nenhuma edição/exclusão.
+    // Etapa 5: setores/{id}: id, estabelecimentoId, nome, criadoEm;
+    // descricao e atualizadoEm opcionais. Nome até 120; descrição até 2000.
+    // Etapa 6: produtos/{id}: id, estabelecimentoId, setorId, nome,
+    // quantidadeInicial, estoqueAtual, criadoEm; descricao/estoqueMinimo/atualizadoEm opcionais.
+    // Quantidades: inteiros de 0 até 9007199254740991. Quantidade inicial imutável.
+    // movimentacoes/inicial_{produtoId}: estabelecimentoId, produtoId, setorId,
+    // tipo entrada, quantidade > 0, observacao Estoque inicial, criadoPor, criadoEm.
+    // Etapa 10B: status ativo/inativo; inativadoEm timestamp|null; inativadoPor UID|null.
+    // possuiHistorico bool irreversível; criação exige todos os campos de ciclo.
+    // Legado sem status é ativo; Etapa 11A: delete de produto sempre negado.
+    // Setor: quantidadeProdutos e ultimaOperacaoProdutoId são campos técnicos.
+    // Contador aceita int ou float integral: RNFB Android serializa increment como double.
+    // Legado sem contador equivale a zero. Cada commit muda um produto por setor.
+    // Etapa 7A: produto mantém quantidadeMovimentacoes, movimentacaoIds (até6 IDs existentes)
+    // e ultimaMovimentacaoId; exclusivamente alterações atômicas vinculadas ao histórico.
+    // Movimentos manuais: id obrigatório, mesmo produto/setor/estabelecimento,
+    // tipo entrada/saida, quantidade inteira >0, observacao opcional <=2000,
+    // criadoPor autenticado e criadoEm serverTimestamp. Etapa 7B: update restrito a
+    // quantidade/observacao/vendedorNome/atualizadoEm; delete individual exige delta atômico.
+    // vendedorNome opcional exclusivamente em saída: string trim, 1..80 caracteres.
+    // ultimaMovimentacaoId identifica também edição/exclusão; pode apontar para ID removido.
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userProfilePath() {
+      return /databases/$(database)/documents/usuarios/$(request.auth.uid);
+    }
+
+    function establishmentPath(id) {
+      return /databases/$(database)/documents/estabelecimentos/$(id);
+    }
+
+    function hasUserProfile() {
+      return exists(userProfilePath());
+    }
+
+    function validId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128
+        && id.matches('^[a-zA-Z0-9_-]+$');
+    }
+
+    function validProfile(data, uid) {
+      return data.keys().hasAll(['id', 'email', 'estabelecimentoId'])
+        && data.keys().hasOnly(['id', 'email', 'estabelecimentoId'])
+        && validId(data.id) && data.id == uid && uid == request.auth.uid
+        && data.email is string && data.email.size() > 0 && data.email.size() <= 254
+        && data.email == request.auth.token.email
+        && validId(data.estabelecimentoId);
+    }
+
+    function validEstablishment(data, id) {
+      return data.keys().hasAll(['id', 'nome', 'criadoEm', 'criadoPor'])
+        && data.keys().hasOnly(['id', 'nome', 'criadoEm', 'criadoPor'])
+        && validId(data.id) && data.id == id
+        && data.nome is string && data.nome.size() > 0 && data.nome.size() <= 120
+        && data.nome.matches('^[^\\s\\p{Z}\\x{FEFF}](.*[^\\s\\p{Z}\\x{FEFF}])?$')
+        && data.criadoEm is timestamp && data.criadoEm == request.time
+        && validId(data.criadoPor) && data.criadoPor == request.auth.uid;
+    }
+
+    function validNewOnboarding(id) {
+      return !hasUserProfile()
+        && !exists(establishmentPath(id))
+        && validProfile(getAfter(userProfilePath()).data, request.auth.uid)
+        && getAfter(userProfilePath()).data.estabelecimentoId == id
+        && validEstablishment(getAfter(establishmentPath(id)).data, id);
+    }
+
+    function belongsToUser(estabelecimentoId) {
+      return signedIn() && hasUserProfile()
+        && get(userProfilePath()).data.estabelecimentoId == estabelecimentoId;
+    }
+
+    function validSector(data, setorId) {
+      return data.keys().hasAll(['id', 'estabelecimentoId', 'nome', 'criadoEm'])
+        && data.keys().hasOnly(['id', 'estabelecimentoId', 'nome', 'descricao', 'criadoEm', 'atualizadoEm', 'quantidadeProdutos', 'ultimaOperacaoProdutoId'])
+        && validId(data.id) && data.id == setorId
+        && validId(data.estabelecimentoId)
+        && data.nome is string && data.nome.size() > 0 && data.nome.size() <= 120
+        && data.nome.matches('^[^\\s\\p{Z}\\x{FEFF}]([\\s\\S]*[^\\s\\p{Z}\\x{FEFF}])?$')
+        && (!('descricao' in data) || (data.descricao is string
+          && data.descricao.size() > 0 && data.descricao.size() <= 2000
+          && data.descricao.matches('^[^\\s\\p{Z}\\x{FEFF}]([\\s\\S]*[^\\s\\p{Z}\\x{FEFF}])?$')))
+        && data.criadoEm is timestamp
+        && (!('atualizadoEm' in data) || data.atualizadoEm is timestamp)
+        && (!('quantidadeProdutos' in data) || validProductCount(data.quantidadeProdutos))
+        && (!('ultimaOperacaoProdutoId' in data) || validId(data.ultimaOperacaoProdutoId));
+    }
+
+    function validQuantity(value) {
+      return value is int && value >= 0 && value <= 9007199254740991;
+    }
+
+    function validProductCount(value) {
+      return value is number && value >= 0 && value <= 9007199254740991
+        && int(value) == value;
+    }
+
+    function sectorPath(id) {
+      return /databases/$(database)/documents/setores/$(id);
+    }
+
+    function productPath(id) {
+      return /databases/$(database)/documents/produtos/$(id);
+    }
+
+    function initialPath(id) {
+      return /databases/$(database)/documents/movimentacoes/$('inicial_' + id);
+    }
+
+    function movementPath(id) {
+      return /databases/$(database)/documents/movimentacoes/$(id);
+    }
+
+    // Registro técnico de até seis IDs existentes; exclusões removem o ID registrado.
+    // Não limita o histórico:
+    // Mantido para compatibilidade das operações individuais; não autoriza cascade.
+    // Produto com qualquer histórico é preservado pela inativação.
+    function movementCount(data) {
+      return data.get('quantidadeMovimentacoes', data.quantidadeInicial > 0 ? 1 : 0);
+    }
+
+    function movementIds(data) {
+      return data.get('movimentacaoIds', data.quantidadeInicial > 0 ? ['inicial_' + data.id] : []);
+    }
+
+    function validRecordedMovementId(id) {
+      return id is string && id.size() > 0 && id.size() <= 136
+        && id.matches('^[a-zA-Z0-9_-]+$');
+    }
+
+    function validMovementRegistry(data) {
+      let ids = movementIds(data);
+      let count = movementCount(data);
+      let joined = ids.join('/');
+      return validQuantity(count) && ids is list && ids.size() <= 6
+        && ids.size() <= (count < 6 ? count : 6)
+        && ids.toSet().size() == ids.size()
+        // Uma regex valida todos os IDs. Roundtrip impede coerção de números
+        // e outros tipos em strings, mantendo schema estrito para cada elemento.
+        && (ids.size() == 0 || (joined.split('/') == ids
+          && joined.matches('^[a-zA-Z0-9_-]{1,136}(/[a-zA-Z0-9_-]{1,136})*$')))
+        && ((!data.keys().hasAny(['quantidadeMovimentacoes', 'movimentacaoIds', 'ultimaMovimentacaoId']))
+          || (data.keys().hasAll(['quantidadeMovimentacoes', 'movimentacaoIds'])
+          && ((!('ultimaMovimentacaoId' in data) && count == 0)
+          || ('ultimaMovimentacaoId' in data && validRecordedMovementId(data.ultimaMovimentacaoId)))));
+    }
+
+    function productCount(data) {
+      return data.get('quantidadeProdutos', 0);
+    }
+
+    // Etapa 10B: legado sem status é ativo; sem marcador nunca autoriza delete.
+    function activeProduct(data) { return data.get('status', 'ativo') == 'ativo'; }
+    function validLifecycle(data) {
+      return data.get('status', 'ativo') in ['ativo', 'inativo']
+        && (!('possuiHistorico' in data) || data.possuiHistorico is bool)
+        && (data.get('inativadoEm', null) == null || data.inativadoEm is timestamp)
+        && (data.get('inativadoPor', null) == null || validId(data.inativadoPor))
+        && (activeProduct(data)
+          ? data.get('inativadoEm', null) == null && data.get('inativadoPor', null) == null
+          : data.inativadoEm is timestamp && validId(data.inativadoPor));
+    }
+    function validLifecycleChange(before, after) {
+      return after.diff(before).affectedKeys().hasOnly(['status', 'inativadoEm', 'inativadoPor', 'atualizadoEm'])
+        && ((activeProduct(before) && after.status == 'inativo'
+          && after.inativadoPor == request.auth.uid && after.inativadoEm == request.time)
+          || (!activeProduct(before) && after.status == 'ativo'
+          && after.inativadoPor == null && after.inativadoEm == null));
+    }
+
+    function validProduct(data, id) {
+      return data.keys().hasAll(['id', 'estabelecimentoId', 'setorId', 'nome', 'quantidadeInicial', 'estoqueAtual', 'criadoEm'])
+        && data.keys().hasOnly(['id', 'estabelecimentoId', 'setorId', 'nome', 'descricao', 'quantidadeInicial', 'estoqueMinimo', 'estoqueAtual', 'criadoEm', 'atualizadoEm', 'quantidadeMovimentacoes', 'movimentacaoIds', 'ultimaMovimentacaoId', 'status', 'inativadoEm', 'inativadoPor', 'possuiHistorico'])
+        && validLifecycle(data)
+        && validId(data.id) && data.id == id
+        && validId(data.estabelecimentoId) && validId(data.setorId)
+        && data.nome is string && data.nome.size() > 0 && data.nome.size() <= 120
+        && data.nome.matches('^[^\\s\\p{Z}\\x{FEFF}]([\\s\\S]*[^\\s\\p{Z}\\x{FEFF}])?$')
+        && (!('descricao' in data) || (data.descricao is string && data.descricao.size() > 0 && data.descricao.size() <= 2000
+          && data.descricao.matches('^[^\\s\\p{Z}\\x{FEFF}]([\\s\\S]*[^\\s\\p{Z}\\x{FEFF}])?$')))
+        && validQuantity(data.quantidadeInicial) && validQuantity(data.estoqueAtual)
+        && (!('estoqueMinimo' in data) || validQuantity(data.estoqueMinimo))
+        && data.criadoEm is timestamp
+        && (!('atualizadoEm' in data) || data.atualizadoEm is timestamp)
+        && validMovementRegistry(data);
+    }
+
+    function validInitialMovement(data, product, id) {
+      return data.keys().hasAll(['estabelecimentoId', 'produtoId', 'setorId', 'tipo', 'quantidade', 'observacao', 'criadoPor', 'criadoEm'])
+        && data.keys().hasOnly(['id', 'estabelecimentoId', 'produtoId', 'setorId', 'tipo', 'quantidade', 'observacao', 'criadoPor', 'criadoEm'])
+        && (!('id' in data) || data.id == id)
+        && id == 'inicial_' + product.id
+        && data.produtoId == product.id && data.setorId == product.setorId
+        && data.estabelecimentoId == product.estabelecimentoId
+        && data.tipo == 'entrada' && validQuantity(data.quantidade) && data.quantidade > 0
+        && data.quantidade == product.quantidadeInicial
+        && data.observacao == 'Estoque inicial'
+        && validId(data.criadoPor) && data.criadoPor == request.auth.uid
+        && data.criadoEm is timestamp && data.criadoEm == request.time && data.criadoEm == product.criadoEm;
+    }
+
+    function validSectorProductChange(setorId) {
+      let id = request.resource.data.ultimaOperacaoProdutoId;
+      let path = productPath(id);
+      let before = productCount(resource.data);
+      let after = productCount(request.resource.data);
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['quantidadeProdutos', 'ultimaOperacaoProdutoId', 'atualizadoEm'])
+        && after == before + 1 && !exists(path) && getAfter(path) != null
+        && getAfter(path).data.setorId == setorId && getAfter(path).data.estabelecimentoId == resource.data.estabelecimentoId;
+    }
+
+    function productSectorChange(data, delta) {
+      let path = sectorPath(data.setorId);
+      return exists(path) && getAfter(path) != null
+        && get(path).data.estabelecimentoId == data.estabelecimentoId
+        && getAfter(path).data.estabelecimentoId == data.estabelecimentoId
+        && productCount(getAfter(path).data) == productCount(get(path).data) + delta
+        && getAfter(path).data.ultimaOperacaoProdutoId == data.id;
+    }
+
+    function validVendor(data) {
+      return !('vendedorNome' in data) || (data.tipo == 'saida'
+        && data.vendedorNome is string && data.vendedorNome.size() > 0 && data.vendedorNome.size() <= 80
+        && data.vendedorNome.matches('^[^\\s\\p{Z}\\x{FEFF}]([\\s\\S]*[^\\s\\p{Z}\\x{FEFF}])?$'));
+    }
+
+    function validNormalMovement(data, product, id) {
+      return data.keys().hasAll(['id', 'estabelecimentoId', 'produtoId', 'setorId', 'tipo', 'quantidade', 'criadoPor', 'criadoEm'])
+        && data.keys().hasOnly(['id', 'estabelecimentoId', 'produtoId', 'setorId', 'tipo', 'quantidade', 'observacao', 'vendedorNome', 'criadoPor', 'criadoEm'])
+        && validVendor(data)
+        && validId(data.id) && data.id == id && id != 'inicial_' + product.id
+        && data.estabelecimentoId == product.estabelecimentoId
+        && data.produtoId == product.id && data.setorId == product.setorId
+        && data.tipo in ['entrada', 'saida']
+        && validQuantity(data.quantidade) && data.quantidade > 0
+        && (!('observacao' in data) || (data.observacao is string && data.observacao.size() > 0 && data.observacao.size() <= 2000
+          && data.observacao.matches('^[^\\s\\p{Z}\\x{FEFF}]([\\s\\S]*[^\\s\\p{Z}\\x{FEFF}])?$')))
+        && validId(data.criadoPor) && data.criadoPor == request.auth.uid
+        && data.criadoEm is timestamp && data.criadoEm == request.time;
+    }
+
+    function validProductMovementCreate(before, after) {
+      let id = after.ultimaMovimentacaoId;
+      let path = movementPath(id);
+      let movement = getAfter(path).data;
+      return after.possuiHistorico == true
+        && after.diff(before).affectedKeys().hasOnly(['estoqueAtual', 'atualizadoEm', 'quantidadeMovimentacoes', 'movimentacaoIds', 'ultimaMovimentacaoId', 'possuiHistorico'])
+        && !exists(path) && validNormalMovement(movement, before, id)
+        && movementCount(after) == movementCount(before) + 1
+        && movementIds(after) == (movementIds(before).size() < 6 ? movementIds(before).concat([id]) : movementIds(before))
+        && after.estoqueAtual == (movement.tipo == 'entrada' ? before.estoqueAtual + movement.quantidade : before.estoqueAtual - movement.quantidade)
+        && after.estoqueAtual >= 0 && after.atualizadoEm == request.time;
+    }
+
+
+    // O ponteiro existente identifica a única operação de saldo deste commit.
+    function movementBelongs(data, product) {
+      return data.produtoId == product.id && data.setorId == product.setorId
+        && data.estabelecimentoId == product.estabelecimentoId;
+    }
+    function validMovementEdit(before, after) {
+      return after.keys().hasAll(['estabelecimentoId', 'produtoId', 'setorId', 'tipo', 'quantidade', 'criadoPor', 'criadoEm'])
+        && after.keys().hasOnly(['id', 'estabelecimentoId', 'produtoId', 'setorId', 'tipo', 'quantidade', 'observacao', 'vendedorNome', 'criadoPor', 'criadoEm', 'atualizadoEm'])
+        && validVendor(after)
+        && after.tipo in ['entrada', 'saida']
+        && after.diff(before).affectedKeys().hasOnly(['quantidade', 'observacao', 'vendedorNome', 'atualizadoEm'])
+        && validQuantity(after.quantidade) && after.quantidade > 0
+        && (!('observacao' in after) || (after.observacao is string && after.observacao.size() > 0 && after.observacao.size() <= 2000
+          && after.observacao.matches('^[^\\s\\p{Z}\\x{FEFF}]([\\s\\S]*[^\\s\\p{Z}\\x{FEFF}])?$')))
+        && after.atualizadoEm is timestamp && after.atualizadoEm == request.time;
+    }
+    function validProductMovementEdit(before, after) {
+      let path = movementPath(after.ultimaMovimentacaoId);
+      let old = get(path).data;
+      let updated = getAfter(path).data;
+      return after.diff(before).affectedKeys().hasOnly(['estoqueAtual', 'atualizadoEm', 'ultimaMovimentacaoId'])
+        && movementBelongs(old, before) && old.quantidade != updated.quantidade
+        && after.estoqueAtual == before.estoqueAtual + (old.tipo == 'entrada' ? updated.quantidade - old.quantidade : old.quantidade - updated.quantidade);
+    }
+    function validProductMovementDelete(before, after) {
+      let path = movementPath(after.ultimaMovimentacaoId);
+      let old = get(path).data;
+      return after.diff(before).affectedKeys().hasOnly(['estoqueAtual', 'atualizadoEm', 'quantidadeMovimentacoes', 'movimentacaoIds', 'ultimaMovimentacaoId'])
+        && getAfter(path) == null && movementBelongs(old, before)
+        && movementCount(after) == movementCount(before) - 1
+        && movementIds(after) == movementIds(before).removeAll([after.ultimaMovimentacaoId])
+        && after.estoqueAtual == before.estoqueAtual + (old.tipo == 'entrada' ? -old.quantidade : old.quantidade);
+    }
+    function validProductMovementChange(before, after) {
+      let path = movementPath(after.ultimaMovimentacaoId);
+      return activeProduct(before) && activeProduct(after) && ((!exists(path) && validProductMovementCreate(before, after))
+        || (exists(path) && getAfter(path) != null && validProductMovementEdit(before, after))
+        || (exists(path) && getAfter(path) == null && validProductMovementDelete(before, after)));
+    }
+    function movementEditLinked(before, after, id) {
+      let path = productPath(before.produtoId);
+      let product = get(path).data;
+      let updated = getAfter(path).data;
+      return activeProduct(product) && activeProduct(updated)
+        && movementBelongs(before, product) && movementBelongs(after, updated)
+        && (before.quantidade == after.quantidade
+          ? updated.estoqueAtual == product.estoqueAtual
+          : updated.ultimaMovimentacaoId == id && updated.estoqueAtual != product.estoqueAtual);
+    }
+    function movementDeleteLinked(data, id) {
+      let path = productPath(data.produtoId);
+      let before = get(path).data;
+      let after = getAfter(path).data;
+      return activeProduct(before) && activeProduct(after)
+        && movementBelongs(data, before) && after.ultimaMovimentacaoId == id
+        && movementCount(after) == movementCount(before) - 1;
+    }
+
+    function normalMovementLinked(data, id) {
+      let path = productPath(data.produtoId);
+      let before = get(path).data;
+      let after = getAfter(path).data;
+      // count +1 impede uma edição de metadados como operação acompanhante.
+      // Portanto a Rule de update do produto obrigatoriamente valida o movimento
+      // deste mesmo ID, seu schema, autor, vínculos, delta e registro append-only.
+      // Não repetir essa validação evita exceder 1000 expressões com opcionais.
+      return activeProduct(before) && activeProduct(after)
+        && data.estabelecimentoId == before.estabelecimentoId
+        && after.ultimaMovimentacaoId == id
+        && movementCount(after) == movementCount(before) + 1;
+    }
+
+    match /usuarios/{uid} {
+      // get do próprio perfil ausente permite recuperar cadastro parcial.
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow create: if signedIn()
+        && validProfile(request.resource.data, uid)
+        && validNewOnboarding(request.resource.data.estabelecimentoId);
+      allow list, update, delete: if false;
+    }
+
+    match /estabelecimentos/{id} {
+      allow get: if signedIn() && hasUserProfile()
+        && get(userProfilePath()).data.estabelecimentoId == id
+        && resource.data.criadoPor == request.auth.uid;
+      allow create: if signedIn()
+        && validEstablishment(request.resource.data, id)
+        && validNewOnboarding(id);
+      allow list, update, delete: if false;
+    }
+
+    match /setores/{setorId} {
+      // A query precisa filtrar estabelecimentoId: Rules não filtram resultados.
+      allow get, list: if belongsToUser(resource.data.estabelecimentoId);
+      allow create: if belongsToUser(request.resource.data.estabelecimentoId)
+        && validSector(request.resource.data, setorId)
+        && productCount(request.resource.data) == 0
+        && !('ultimaOperacaoProdutoId' in request.resource.data)
+        && request.resource.data.criadoEm == request.time
+        && (!('atualizadoEm' in request.resource.data)
+          || request.resource.data.atualizadoEm == request.time);
+      allow update: if belongsToUser(resource.data.estabelecimentoId)
+        && validSector(request.resource.data, setorId)
+        && request.resource.data.id == resource.data.id
+        && request.resource.data.estabelecimentoId == resource.data.estabelecimentoId
+        && request.resource.data.criadoEm == resource.data.criadoEm
+        && (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['nome', 'descricao', 'atualizadoEm'])
+          || validSectorProductChange(setorId))
+        && request.resource.data.atualizadoEm == request.time;
+      allow delete: if belongsToUser(resource.data.estabelecimentoId) && productCount(resource.data) == 0;
+    }
+
+    match /produtos/{produtoId} {
+      allow get, list: if belongsToUser(resource.data.estabelecimentoId);
+      allow create: if belongsToUser(request.resource.data.estabelecimentoId)
+        && validProduct(request.resource.data, produtoId)
+        && request.resource.data.keys().hasAll(['status', 'inativadoEm', 'inativadoPor', 'possuiHistorico'])
+        && request.resource.data.status == 'ativo'
+        && request.resource.data.possuiHistorico == (request.resource.data.quantidadeInicial > 0)
+        && request.resource.data.criadoEm == request.time
+        && (!('atualizadoEm' in request.resource.data) || request.resource.data.atualizadoEm == request.time)
+        && request.resource.data.estoqueAtual == request.resource.data.quantidadeInicial
+        && movementCount(request.resource.data) == (request.resource.data.quantidadeInicial > 0 ? 1 : 0)
+        && movementIds(request.resource.data) == (request.resource.data.quantidadeInicial > 0 ? ['inicial_' + produtoId] : [])
+        && (!('ultimaMovimentacaoId' in request.resource.data)
+          || (request.resource.data.quantidadeInicial > 0 && request.resource.data.ultimaMovimentacaoId == 'inicial_' + produtoId))
+        && productSectorChange(request.resource.data, 1)
+        && !exists(initialPath(produtoId))
+        && ((request.resource.data.quantidadeInicial == 0 && getAfter(initialPath(produtoId)) == null)
+          || (request.resource.data.quantidadeInicial > 0
+          && validInitialMovement(getAfter(initialPath(produtoId)).data, request.resource.data, 'inicial_' + produtoId)));
+      allow update: if belongsToUser(resource.data.estabelecimentoId)
+        && validProduct(request.resource.data, produtoId)
+        && (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['nome', 'descricao', 'estoqueMinimo', 'atualizadoEm'])
+          || validLifecycleChange(resource.data, request.resource.data)
+          || validProductMovementChange(resource.data, request.resource.data))
+        && request.resource.data.atualizadoEm == request.time;
+      allow delete: if false;
+    }
+
+    match /movimentacoes/{movimentacaoId} {
+      allow get, list: if belongsToUser(resource.data.estabelecimentoId);
+      allow create: if belongsToUser(request.resource.data.estabelecimentoId)
+        && validId(request.resource.data.produtoId)
+        && ((!exists(productPath(request.resource.data.produtoId))
+          && validInitialMovement(request.resource.data, getAfter(productPath(request.resource.data.produtoId)).data, movimentacaoId))
+          || (exists(productPath(request.resource.data.produtoId))
+          && normalMovementLinked(request.resource.data, movimentacaoId)));
+      allow update: if belongsToUser(resource.data.estabelecimentoId)
+        && validMovementEdit(resource.data, request.resource.data)
+        && movementEditLinked(resource.data, request.resource.data, movimentacaoId);
+      allow delete: if belongsToUser(resource.data.estabelecimentoId)
+        && exists(productPath(resource.data.produtoId))
+        && get(productPath(resource.data.produtoId)).data.estabelecimentoId == resource.data.estabelecimentoId
+        && getAfter(productPath(resource.data.produtoId)) != null
+        && movementDeleteLinked(resource.data, movimentacaoId);
+    }
+
+    // Subcoleções e operações não previstas continuam fechadas.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

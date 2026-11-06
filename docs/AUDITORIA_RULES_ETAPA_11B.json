@@ -1,0 +1,25 @@
+{
+  "score": 5,
+  "summary": "Reauditoria 11B do mesmo firestore.rules implantado na 11A: isolamento e validação create/update preservados, delete de produto negado, vendedor não amplia autoridade nem altera saldo. Sem bypass crítico nos cenários examinados.",
+  "findings": [],
+  "date": "2026-10-13",
+  "scope": "firestore.rules; isolamento, onboarding, produtos/ciclo/RN08, movimentações, vendedorNome e queries existentes",
+  "evidence": {
+    "rulesEmulator": "551/551 PASS; preservados547 anteriores, mais três subcenários concorrentes e seu teste agrupador. Fixture400 agora inclui100 saídas com vendedor e100 sem vendedor.",
+    "identity": "Pertencimento consultado no perfil persistido; perfil e estabelecimento não podem ser retocados para autoatribuir acesso. Usuários não leem perfis alheios.",
+    "createUpdateParity": "validVendor aplicado a criação manual e edição; inicial de entrada mantém whitelist sem vendedor. Tipo, autor, datas de criação e vínculos continuam imutáveis.",
+    "resourceLimits": "Nome 1..80 caracteres, sem whitespace nas pontas, tipo string; rejeita null/lista/mapa/número, vazios, 81 caracteres e campos pessoais adicionais. Limites e validadores existentes preservados.",
+    "stock": "Vendedor não autoriza editar produto ou contador; edição de quantidade exige delta atômico, releitura e produto ativo. Deltas, negativo, overflow e concorrência continuam cobertos pela suíte.",
+    "deletion": "Produtos: allow delete if false sem exceções. Decremento de contador de setor por delete removido. RN08 continua bloqueando setor com produtos ativos/inativos. Delete individual de movimentação mantém saldo e histórico atômicos.",
+    "queries": "Home só consulta produtos/setores por estabelecimento; histórico global continua consulta isolada, ordenada e limitada. Nenhuma query ou índice por vendedor.",
+    "crossTenant": "Leitura e edição de vendedor A/B e anônimo negadas; whitelist não constitui identidade e permanece combinada à verificação de perfil.",
+    "attackReview": "Revisados: list público, create/update/delete alheios, alteração de papel/perfil/vínculos/autor/tipo/data, campo extra, tipagem, tamanho, omissão de obrigatórios, contador sem operação associada, múltiplas movimentações compartilhando delta, acesso a caminhos não previstos. Sem bypass observado nos cenários exercitados.",
+    "finalChecks": "13/10: TypeScript PASS, lógica/serviços/UI138/138, Expo Doctor18/18, Rules Emulator551/551, diff check PASS. Android E2E, responsividade360/411, seis operações offline, A/B/A, volume400, vinte ciclos e cleanup PASS. Fonte ativa igual à local; nenhum redeploy.",
+    "concurrency11B": "Três cenários novos com commits concorrentes reais e precondições no Firestore Emulator: saídas8/7 em saldo10, vendedor com saída concorrente, quantidade/vendedor com saída. Releitura após conflito confirma invariantes.",
+    "activeRules": "Fonte ativa novamente conferida igual à local, hash 79eee65056192429da1b2cbcc677328010bcd0fcdcfd8cb03d4762706ff44b32; nenhuma mudança ou redeploy nesta etapa.",
+    "nativeVolume": "Android development build existente: produto com400 movimentos, paginação50→100, relatório427/217/saldo210/404 registros, Home4 ativos/1 setor/3 reposição/2 zerados. Edição cliente de vendedor não mudou números; queries50/100/400 isoladas e ordenadas.",
+    "finalNative": "A/B/A visual e APIs normais: A427/217/saldo210, B7/1/saldo6, sem dados/vendedores cruzados; 20 ciclos com volume sem crash/ANR observado. Fixtures418 documentos e2 contasAuth removidas, estado físico do emulador restaurado e janela visível.",
+    "nativeLogObservation": "Sem crash/ANR/ReactNativeJS Error relevante; RN0.81.5 capturou corridas de nós nativos de animação e descartou quadros. Fonte instalada confirma recuperação, sem uso direto Animated.add/multiply em src. Observação da dependência registrada; smoke Auth3 ciclos posteriores sem nova ocorrência. Não altera score de Rules."
+  },
+  "limitations": "Score refere-se ao escopo e cenários examinados; não representa prova exaustiva de segurança nem avaliação de alterações administrativas fora das Rules. Clientes administrativos seguem podendo remover fixtures."
+}

@@ -1,0 +1,21 @@
+{
+  "score": 5,
+  "summary": "Auditoria estática e adversarial no escopo examinado: nenhuma falha crítica identificada. Delete de produto sempre negado; vendedorNome opcional apenas em saída, validado na criação e edição, sem ampliar permissões de identidade ou estoque.",
+  "findings": [],
+  "date": "2026-10-13",
+  "scope": "firestore.rules; isolamento, onboarding, produtos/ciclo/RN08, movimentações, vendedorNome e queries existentes",
+  "evidence": {
+    "rulesEmulator": "547/547 PASS; 500 cenários preservados com expectativas de delete atualizadas, mais 47 cenários novos",
+    "identity": "Pertencimento consultado no perfil persistido; perfil e estabelecimento não podem ser retocados para autoatribuir acesso. Usuários não leem perfis alheios.",
+    "createUpdateParity": "validVendor aplicado a criação manual e edição; inicial de entrada mantém whitelist sem vendedor. Tipo, autor, datas de criação e vínculos continuam imutáveis.",
+    "resourceLimits": "Nome 1..80 caracteres, sem whitespace nas pontas, tipo string; rejeita null/lista/mapa/número, vazios, 81 caracteres e campos pessoais adicionais. Limites e validadores existentes preservados.",
+    "stock": "Vendedor não autoriza editar produto ou contador; edição de quantidade exige delta atômico, releitura e produto ativo. Deltas, negativo, overflow e concorrência continuam cobertos pela suíte.",
+    "deletion": "Produtos: allow delete if false sem exceções. Decremento de contador de setor por delete removido. RN08 continua bloqueando setor com produtos ativos/inativos. Delete individual de movimentação mantém saldo e histórico atômicos.",
+    "queries": "Home só consulta produtos/setores por estabelecimento; histórico global continua consulta isolada, ordenada e limitada. Nenhuma query ou índice por vendedor.",
+    "crossTenant": "Leitura e edição de vendedor A/B e anônimo negadas; whitelist não constitui identidade e permanece combinada à verificação de perfil.",
+    "attackReview": "Revisados: list público, create/update/delete alheios, alteração de papel/perfil/vínculos/autor/tipo/data, campo extra, tipagem, tamanho, omissão de obrigatórios, contador sem operação associada, múltiplas movimentações compartilhando delta, acesso a caminhos não previstos. Sem bypass observado nos cenários exercitados.",
+    "activeRules": "Deploy exclusivo firestore:rules em 12/10/2026 13:16:29 UTC; fonte ativa igual à local em 13/10, SHA256 79eee65056192429da1b2cbcc677328010bcd0fcdcfd8cb03d4762706ff44b32. Cliente normal: GET 200, DELETE 403, GET 200.",
+    "finalChecks": "13/10: TypeScript PASS, lógica/serviços/UI 124/124, Expo Doctor 18/18, Rules Emulator 547/547. E2E development build x86_64 autorizado, Metro, 360x740 e 411x891; saldo final 12, vendedor opcional e remoção real do campo."
+  },
+  "limitations": "Score refere-se ao escopo e cenários examinados; não representa prova exaustiva de segurança nem avaliação de alterações administrativas fora das Rules. Clientes administrativos seguem podendo remover fixtures."
+}

@@ -1,0 +1,40 @@
+{
+  "score": 5,
+  "summary": "PASS no escopo e nos cenários verificados da Etapa 10B. 498 testes no Emulator, incluindo 52 novos cenários. Sem permissões abertas, perda de histórico ou bypass encontrado na revisão.",
+  "findings": [],
+  "checks": {
+    "updateBypass": "Schemas estritos e diff por operação; não permite remover marcador, false sem movimento, true para false, editar auditoria ou vínculos.",
+    "authority": "Perfil próprio imutável; onboarding atômico cria estabelecimento próprio. Autoria de inativação exige request.auth.uid; leituras/escritas exigem associação persistida.",
+    "businessLogic": "Criação positiva exige inicial; primeira movimentação marca histórico no mesmo commit. Produto inativo bloqueia create/update/delete de movimentos antes e depois do commit. Reativação não permite movimento no mesmo commit.",
+    "storageAbuse": "Textos, IDs, quantidades e arrays limitados; registro valida tipos/roundtrip, unicidade e seis IDs. Histórico não tem limite de seis operações.",
+    "typeSafety": "Enum status, timestamp|null, UID|null e bool, timestamps request.time; saldo e deltas inteiros seguros.",
+    "identity": "belongsToUser com perfil persistido protege get/list/create/update/delete, além do diff. A/B nas duas direções e anônimo negados.",
+    "delete": "Somente marcador explicitamente false e inicial/saldo/contagem/registro zerados; decremento atômico do setor; cascade removido das permissões.",
+    "legacy": "Status ausente equivale a ativo. Marcador ausente não autoriza delete; sua inclusão como true exige movimento válido.",
+    "rn08": "Contador inclui ativos e inativos; inativação/reativação não alteram contador. Decremento exige delete de produto autorizado.",
+    "queries": "Consultas existentes mantêm filtro estabelecimentoId; histórico e relatórios incluem inativos. Nenhum índice novo necessário."
+  },
+  "limitations": "Revisão e testes não são garantia exaustiva contra todos os ataques. Importações administrativas contornam Rules e devem preservar contratos de saldo/contadores; não houve migração de dados.",
+  "attackReview": {
+    "publicList": "DENY sem autenticação e sem escopo de estabelecimento.",
+    "crossTenant": "DENY A→B/B→A em leitura, mutações e consultas.",
+    "updateBypass": "DENY schema/campos inválidos, remoção de campos obrigatórios e valores excessivos; validadores presentes em updates.",
+    "ownershipCreate": "Onboarding só permite UID/email autenticados e estabelecimento novo criado no mesmo commit.",
+    "ownershipUpdate": "Perfil e estabelecimento são imutáveis; produto/movimento não transferem autoria ou vínculos.",
+    "immutable": "createdAt/criadoEm, inicial, IDs, vínculos e tipo protegidos pelo diff.",
+    "typeJuggling": "Tipos de quantidades, IDs, datas, status, bool e listas verificados.",
+    "resourceExhaustion": "Textos e IDs limitados, arrays limitados e elementos validados; limites preservados em update.",
+    "requiredFields": "Criação exige ciclo completo; update preserva compatibilidade restrita para campos legados.",
+    "privilegeEscalation": "Sem role/isAdmin livre nem vínculo arbitrário ao estabelecimento; onboarding e perfil persistido definem acesso.",
+    "schemaPollution": "hasOnly em entidades; alterações fora do schema negadas.",
+    "invalidTransition": "DENY alterações de auditoria sem transição; autor=request.auth.uid/data=request.time para inativar; reativar limpa ambos.",
+    "pathScoping": "IDs limitados; setor/produto/movimento exigem vínculos coerentes com estabelecimento.",
+    "timestampManipulation": "Timestamps de criação/operação exigem request.time e criação anterior é imutável.",
+    "negativeOverflow": "Inteiros seguros, deltas exatos, estoque final não negativo.",
+    "mixedContentPII": "Perfil próprio apenas get; não há list nem leitura de email de outro UID.",
+    "counterReplay": "Incremento/decremento requer produto correspondente criado/removido via getAfter; nenhuma mudança de status altera contador.",
+    "orphans": "Delete de setor com contador positivo negado; delete de produto histórico negado; writes de movimento precisam de produto existente.",
+    "queryMismatch": "Consultas atuais com estabelecimentoId são permitidas; não dependem de filtrar status no servidor.",
+    "validatorCoverage": "Validadores em todas as entidades com create/update liberados; perfis/estabelecimentos não têm update autorizado."
+  }
+}

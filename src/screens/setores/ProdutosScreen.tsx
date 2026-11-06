@@ -1,144 +1,72 @@
-import React, { useCallback, useState } from 'react';
-import { View, Text, FlatList, TouchableOpacity } from 'react-native';
+import { dadosDeRota } from '../../navigation/dadosDeRota';
+import type { StockScreenProps } from '../../navigation/types';
+import React, { useState } from 'react';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
-import { listarProdutosPorSetor } from '../../storage/produtosStorage';
-import { Produto } from '../../types/produto.types';
-import { Setor } from '../../types/setor.types';
+import { useProdutos } from '../../services/produtos/useProdutos';
+import { ProdutoLifecycleActions } from '../../components/ProdutoLifecycleActions';
+import { produtoAtivo } from '../../utils/cicloProduto';
+import { AppButton } from '../../components/ui/AppButton';
+import { colors, radii, spacing, touchTarget, typography } from '../../theme';
+import { precisaReposicao } from '../../utils/produtos';
+import type { Produto } from '../../types/produto.types';
+import { LoadingState, EmptyState } from '../../components/ui/ScreenState';
+import { FormButton, authStyles } from '../../components/AuthFormLayout';
 
-export default function ProdutosScreen() {
-  const navigation = useNavigation<any>();
-  const route = useRoute<any>();
-  const setor: Setor = route.params?.setor;
-
-  const [produtos, setProdutos] = useState<Produto[]>([]);
-
-  function handleNovoProduto() {
-    navigation.navigate('ProdutoForm', { setor });
-  }
-
-  async function carregarProdutos() {
-    const lista = await listarProdutosPorSetor(setor.id);
-    setProdutos(lista);
-  }
-
-  useFocusEffect(
-    useCallback(() => {
-      carregarProdutos();
-    }, [setor.id])
-  );
-
+export default function ProdutosScreen({ navigation, route }: StockScreenProps<'Produtos'>) {
+  const { setor } = route.params;
+  const { estado, contexto, tentarNovamente } = useProdutos(setor.id);
+  const valido = contexto?.estabelecimentoId === setor.estabelecimentoId;
+  const [aba, setAba] = useState<'ativo' | 'inativo'>('ativo');
+  const produtos = valido && estado.status === 'data' ? estado.produtos.filter(p => produtoAtivo(p) === (aba === 'ativo')) : [];
   function renderProduto({ item }: { item: Produto }) {
-    return (
-      <View
-        style={{
-          backgroundColor: '#FFF',
-          borderRadius: 14,
-          padding: 16,
-          marginBottom: 12,
-          borderWidth: 1,
-          borderColor: '#E5E5E5',
-        }}
-      >
-        <Text style={{ fontSize: 17, fontWeight: '700', color: '#111' }}>
-          {item.nome}
-        </Text>
-
-        <Text style={{ marginTop: 4, fontSize: 14, color: '#666' }}>
-          {item.descricao ? item.descricao : 'Sem descrição'}
-        </Text>
-
-        <Text style={{ marginTop: 8, fontSize: 14, color: '#1E88E5' }}>
-          Quantidade: {item.quantidade}
-        </Text>
-      </View>
-    );
-  }
-
-  function renderEmptyState() {
-    return (
-      <View
-        style={{
-          flex: 1,
-          justifyContent: 'center',
-          alignItems: 'center',
-          paddingHorizontal: 24,
-        }}
-      >
-        <Ionicons name="cube-outline" size={64} color="#B0BEC5" />
-        <Text
-          style={{
-            marginTop: 16,
-            fontSize: 22,
-            fontWeight: '700',
-            color: '#222',
-            textAlign: 'center',
-          }}
-        >
-          Nenhum produto cadastrado
-        </Text>
-
-        <Text
-          style={{
-            marginTop: 8,
-            fontSize: 15,
-            color: '#666',
-            textAlign: 'center',
-            lineHeight: 22,
-          }}
-        >
-          Adicione produtos para este setor.
-        </Text>
-      </View>
-    );
-  }
-
-  return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F5F5F5' }}>
-      <View style={{ flex: 1, paddingHorizontal: 20, paddingTop: 12 }}>
-        <View style={{ marginBottom: 20 }}>
-          <Text style={{ fontSize: 30, fontWeight: '700', color: '#111' }}>
-            {setor.nome}
-          </Text>
-          <Text style={{ marginTop: 6, fontSize: 15, color: '#666' }}>
-            Produtos cadastrados neste setor
-          </Text>
-        </View>
-
-        <TouchableOpacity
-          style={{
-            backgroundColor: '#1E88E5',
-            borderRadius: 12,
-            paddingVertical: 14,
-            paddingHorizontal: 16,
-            marginBottom: 20,
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 8,
-          }}
-          activeOpacity={0.8}
-          onPress={handleNovoProduto}
-        >
-          <Ionicons name="add-circle-outline" size={20} color="#FFF" />
-          <Text style={{ color: '#FFF', fontSize: 16, fontWeight: '600' }}>
-            Novo produto
-          </Text>
+    return <View style={styles.card}>
+      <TouchableOpacity style={{ minHeight: touchTarget }} accessibilityRole="button" accessibilityLabel={`Abrir produto ${item.nome}`}
+        onPress={() => navigation.navigate('ProdutoDetalhes', { setor, produtoId: item.id })}>
+        <Text style={styles.nome}>{item.nome}</Text>
+        <Text style={styles.editar}>Ver detalhes e movimentações</Text>
+      </TouchableOpacity>
+      <Text style={styles.descricao}>{item.descricao || 'Sem descrição'}</Text>
+      <Text style={styles.saldo}>Estoque atual: {item.estoqueAtual}</Text>
+      {item.estoqueMinimo !== undefined ? <Text style={styles.descricao}>Estoque mínimo: {item.estoqueMinimo}</Text> : null}
+      {produtoAtivo(item) && item.estoqueAtual === 0 ? <Text style={styles.atencao}>Estoque zerado</Text> : null}
+      {produtoAtivo(item) && precisaReposicao(item) ? <Text style={styles.atencao}>Necessita reposição</Text> : null}
+      {item.status === 'inativo' ? <Text style={styles.descricao}>Produto inativo{item.inativadoEm ? ` • ${item.inativadoEm.toLocaleDateString('pt-BR')}` : ''}</Text> : null}
+      <View style={styles.acoes}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Editar produto ${item.nome}`}
+          disabled={!valido} style={styles.acao} onPress={() => navigation.navigate('ProdutoForm', { setor, produto: dadosDeRota(item) })}>
+          <Text style={styles.editar}>Editar</Text>
         </TouchableOpacity>
-
-        <FlatList
-          data={produtos}
-          keyExtractor={(item) => item.id}
-          renderItem={renderProduto}
-          contentContainerStyle={{
-            paddingBottom: 20,
-            flexGrow: produtos.length === 0 ? 1 : 0,
-          }}
-          ListEmptyComponent={renderEmptyState}
-          showsVerticalScrollIndicator={false}
-        />
       </View>
-    </SafeAreaView>
-  );
+      <ProdutoLifecycleActions produto={item} contexto={valido ? contexto : null} />
+    </View>;
+  }
+  const erroVisivel = !valido ? 'Este setor não pertence à sessão atual.' : (estado.status === 'error' ? estado.mensagem : null);
+  return <SafeAreaView edges={['bottom', 'left', 'right']} style={styles.area}>
+    <View style={styles.conteudo}>
+      <Text style={styles.titulo}>{setor.nome}</Text>
+      <Text style={authStyles.subtitle}>Produtos cadastrados neste setor</Text>
+      <FormButton label="Novo produto" disabled={!valido} onPress={() => navigation.navigate('ProdutoForm', { setor })} />
+      {estado.status === 'loading' ? <LoadingState /> : null}
+      <View style={styles.acoes}><View style={{ flex: 1 }}><AppButton label="Ativos" selected={aba === 'ativo'} variant={aba === 'ativo' ? 'primary' : 'secondary'} onPress={() => setAba('ativo')} /></View><View style={{ flex: 1 }}><AppButton label="Inativos" selected={aba === 'inativo'} variant={aba === 'inativo' ? 'primary' : 'secondary'} onPress={() => setAba('inativo')} /></View></View>
+      {erroVisivel ? <View><Text accessibilityRole="alert" style={authStyles.error}>{erroVisivel}</Text>
+        <FormButton label="Tentar novamente" onPress={tentarNovamente} /></View> : null}
+      <FlatList data={produtos} keyExtractor={p => p.id} renderItem={renderProduto}
+        contentContainerStyle={styles.lista} ListEmptyComponent={estado.status === 'data' && !erroVisivel
+          ? <EmptyState title={aba === 'ativo' ? 'Nenhum produto ativo' : 'Nenhum produto inativo'} message={aba === 'ativo' ? 'Adicione um produto ou reative um produto deste setor.' : 'Os produtos inativados aparecerão aqui com estoque e histórico preservados.'} /> : null} />
+    </View>
+  </SafeAreaView>;
 }
+
+const styles = StyleSheet.create({
+  area: { flex: 1, backgroundColor: colors.background }, conteudo: { flex: 1, padding: spacing.xl },
+  titulo: { ...typography.title, color: colors.text, marginBottom: 8 },
+  card: { backgroundColor: colors.surface, borderRadius: radii.lg, borderWidth: 1, borderColor: colors.border, padding: spacing.lg, marginBottom: 12 },
+  nome: { ...typography.cardTitle, color: colors.text }, descricao: { ...typography.caption, color: colors.textSecondary, marginTop: 6 },
+  saldo: { ...typography.cardTitle, color: colors.primary, marginTop: 8 },
+  atencao: { ...typography.label, color: colors.warning, marginTop: 6 },
+  acoes: { flexDirection: 'row', justifyContent: 'flex-end', flexWrap: 'wrap', marginTop: 8, gap: 12 },
+  acao: { minHeight: 48, minWidth: 80, justifyContent: 'center', alignItems: 'center' },
+  editar: { ...typography.label, color: colors.primary },
+  lista: { flexGrow: 1, paddingBottom: spacing.xl },
+});

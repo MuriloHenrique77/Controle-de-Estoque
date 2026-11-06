@@ -1,33 +1,75 @@
 {
   "expo": {
-    "name": "Controle-de-Fluxo",
+    "name": "Setority",
     "slug": "Controle-de-Fluxo",
-    "version": "1.0.0",
+    "version": "1.1.2",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/setority-icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/setority-splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#F7F9FC"
     },
     "ios": {
+      "bundleIdentifier": "com.murilo.estoqueporsetores",
       "supportsTablet": true
     },
     "android": {
+      "package": "com.murilo.estoqueporsetores",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "foregroundImage": "./assets/setority-adaptive-foreground.png",
+        "backgroundImage": "./assets/setority-adaptive-background.png",
+        "backgroundColor": "#DCE8F4"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "versionCode": 4
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/setority-icon.png"
     },
     "plugins": [
-      "expo-font"
-    ]
+      [
+        "expo-splash-screen",
+        {
+          "android": {
+            "image": "./assets/setority-adaptive-foreground.png",
+            "imageWidth": 216,
+            "resizeMode": "contain",
+            "backgroundColor": "#F7F9FC"
+          }
+        }
+      ],
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "./node_modules/@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf",
+            "./node_modules/@expo-google-fonts/inter/500Medium/Inter_500Medium.ttf",
+            "./node_modules/@expo-google-fonts/inter/600SemiBold/Inter_600SemiBold.ttf",
+            "./node_modules/@expo-google-fonts/inter/700Bold/Inter_700Bold.ttf"
+          ]
+        }
+      ],
+      "@react-native-firebase/app",
+      "@react-native-firebase/auth",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "dynamic"
+          }
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "e9261937-6c10-4383-a08d-dbaf2dad9f79"
+      }
+    },
+    "owner": "murilohenrique"
   }
 }
